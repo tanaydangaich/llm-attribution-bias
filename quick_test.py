@@ -15,11 +15,7 @@ import os
 import re
 from pathlib import Path
 
-try:
-    from scipy.stats import wilcoxon, mannwhitneyu, kruskal
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
+from scipy.stats import wilcoxon, mannwhitneyu, kruskal
 
 import openai
 
@@ -36,7 +32,7 @@ CONDITIONS = ["blind", "true", "upward", "downward"]
 
 PROMPTS = [
     {"id": "a1", "task_type": "analytical",
-     "prompt": "A snail climbs 3 feet up a 10-foot wall each day, but slides back 2 feet each night. How many days does it take to reach the top? Show all steps."},
+     "prompt": "A company's revenue grew 20% in year 1 and then declined 20% in year 2. A manager claims they 'broke even' over the two years. Is the manager correct? Show your reasoning and calculate the actual net change."},
     {"id": "a2", "task_type": "analytical",
      "prompt": "Five pirates must split 100 gold coins. They vote on proposals in order of seniority; a proposal passes if at least 50% agree. The most senior pirate proposes first. What does the most senior pirate propose to maximize their own share, assuming all pirates are perfectly rational and self-interested? Show your reasoning."},
     {"id": "c1", "task_type": "creative",
@@ -69,8 +65,9 @@ SCORE: <integer 1-10>
 RATIONALE: <one or two sentences>
 """
 
-SCORE_RE = re.compile(r"SCORE:\s*(\d+)")
-RATIONALE_RE = re.compile(r"RATIONALE:\s*(.+)", re.DOTALL)
+# Handles: SCORE: 8, **SCORE:** 8, SCORE: 8/10, SCORE:8
+SCORE_RE = re.compile(r"\*{0,2}SCORE\*{0,2}:\s*\*{0,2}(\d+)", re.IGNORECASE)
+RATIONALE_RE = re.compile(r"\*{0,2}RATIONALE\*{0,2}:\s*(.+)", re.DOTALL | re.IGNORECASE)
 
 _DIR = Path(__file__).parent
 RESPONSES_FILE = str(_DIR / "data" / "test_responses.json")
@@ -82,9 +79,14 @@ JUDGMENTS_FILE = str(_DIR / "data" / "test_judgments.json")
 def parse_judgment(text: str) -> dict:
     s = SCORE_RE.search(text)
     r = RATIONALE_RE.search(text)
+    score = None
+    if s:
+        raw = int(s.group(1))
+        score = raw if 1 <= raw <= 10 else None  # discard out-of-range hallucinations
     return {
-        "score": int(s.group(1)) if s else None,
+        "score": score,
         "rationale": r.group(1).strip() if r else None,
+        "parse_failed": score is None,
     }
 
 
@@ -114,13 +116,28 @@ def build_attribution(condition: str, response_model_id: str):
 
 
 async def call(clients: dict, model_id: str, prompt: str, temperature: float, max_tokens: int) -> str:
-    resp = await clients["openai"].chat.completions.create(
-        model=model_id,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    return resp.choices[0].message.content.strip()
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            resp = await clients["openai"].chat.completions.create(
+                model=model_id,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return resp.choices[0].message.content.strip()
+        except openai.RateLimitError:
+            wait = 2 ** attempt  # 1s, 2s, 4s, 8s, 16s
+            print(f"  rate limited — retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(wait)
+        except openai.APIStatusError as e:
+            if e.status_code >= 500:
+                wait = 2 ** attempt
+                print(f"  server error {e.status_code} — retrying in {wait}s")
+                await asyncio.sleep(wait)
+            else:
+                raise
+    raise RuntimeError(f"max retries exceeded for model {model_id}")
 
 
 # ── Phase 1: generate responses ───────────────────────────────────────────────
@@ -222,13 +239,14 @@ async def _judge_one(clients, semaphore, r, judge, cond, dry_run):
 # ── Phase 3: quick summary ────────────────────────────────────────────────────
 
 def _mean(vals): return sum(vals) / len(vals) if vals else None
-def _sem(vals):
-    import math
+
+def _bootstrap_ci(vals, n_boot=2000, ci=0.95):
+    import random
     n = len(vals)
-    if n < 2: return None
-    mu = _mean(vals)
-    var = sum((x - mu) ** 2 for x in vals) / (n - 1)
-    return math.sqrt(var / n)
+    if n < 2: return None, None
+    means = sorted(_mean(random.choices(vals, k=n)) for _ in range(n_boot))
+    lo = (1 - ci) / 2
+    return means[int(lo * n_boot)], means[int((1 - lo) * n_boot)]
 
 
 def summarize(judgments):
@@ -262,7 +280,7 @@ def summarize(judgments):
     print("RESULTS")
     print("="*60)
 
-    # ── Mean deltas + CIs ──────────────────────────────────────────
+    # ── Mean deltas + bootstrap CIs ────────────────────────────────
     print("\nMean attribution delta (vs blind):")
     for cond in ["true", "upward", "downward"]:
         vals = deltas[cond]
@@ -270,14 +288,13 @@ def summarize(judgments):
             print(f"  {cond:10s}  no data")
             continue
         mu = _mean(vals)
-        se = _sem(vals)
-        n = len(vals)
-        ci = f"[{mu - 1.96*se:+.3f}, {mu + 1.96*se:+.3f}]" if se else "n/a"
-        print(f"  {cond:10s}  mean={mu:+.3f}  95% CI {ci}  n={n}")
+        lo, hi = _bootstrap_ci(vals)
+        ci = f"[{lo:+.3f}, {hi:+.3f}]" if lo is not None else "n/a"
+        print(f"  {cond:10s}  mean={mu:+.3f}  95% bootstrap CI {ci}  n={len(vals)}")
 
     # ── Asymmetry test ─────────────────────────────────────────────
     print("\nAsymmetry test (|downward delta| > |upward delta|):")
-    if HAS_SCIPY:
+    if True:  # scipy is a hard dependency
         # Build matched pairs on (response_model, judge_model, prompt_id, rep)
         up_map, down_map = {}, {}
         for j in judgments:
@@ -306,36 +323,31 @@ def summarize(judgments):
                 print(f"  error: {e}")
         else:
             print(f"  only {n_pairs} matched pairs — insufficient for test (need ≥10)")
-    else:
-        print("  scipy not installed — run: pip install scipy")
 
     # ── One-sample Wilcoxon: is each delta significantly ≠ 0? ─────
     print("\nOne-sample test (delta significantly ≠ 0):")
-    if HAS_SCIPY:
-        for cond in ["true", "upward", "downward"]:
-            vals = deltas[cond]
-            if len(vals) < 10:
-                print(f"  {cond:10s}  n={len(vals)} — too small")
-                continue
-            try:
-                _, p = wilcoxon(vals, alternative="two-sided")
-                sig = "* significant" if p < 0.05 else "not significant"
-                print(f"  {cond:10s}  p={p:.4f}  ({sig})")
-            except Exception as e:
-                print(f"  {cond:10s}  error: {e}")
-    else:
-        print("  scipy not installed")
+    for cond in ["true", "upward", "downward"]:
+        vals = deltas[cond]
+        if len(vals) < 10:
+            print(f"  {cond:10s}  n={len(vals)} — too small")
+            continue
+        try:
+            _, p = wilcoxon(vals, alternative="two-sided")
+            sig = "* significant" if p < 0.05 else "not significant"
+            print(f"  {cond:10s}  p={p:.4f}  ({sig})")
+        except Exception as e:
+            print(f"  {cond:10s}  error: {e}")
 
     # ── By task type ───────────────────────────────────────────────
     print("\nDownward delta by task type:")
     task_groups = deltas_by_task["downward"]
     for task, vals in sorted(task_groups.items()):
         mu = _mean(vals)
-        se = _sem(vals)
-        ci = f"[{mu - 1.96*se:+.3f}, {mu + 1.96*se:+.3f}]" if se else "n/a"
-        print(f"  {task:12s}  mean={mu:+.3f}  95% CI {ci}  n={len(vals)}")
+        lo, hi = _bootstrap_ci(vals)
+        ci = f"[{lo:+.3f}, {hi:+.3f}]" if lo is not None else "n/a"
+        print(f"  {task:12s}  mean={mu:+.3f}  95% bootstrap CI {ci}  n={len(vals)}")
 
-    if HAS_SCIPY and len(task_groups) >= 2:
+    if len(task_groups) >= 2:
         try:
             h, p_kw = kruskal(*task_groups.values())
             print(f"  Kruskal-Wallis H={h:.3f}, p={p_kw:.4f}")
@@ -356,11 +368,11 @@ def summarize(judgments):
     judge_groups = deltas_by_judge["downward"]
     for judge, vals in sorted(judge_groups.items(), key=lambda x: MODEL_BY_ID[x[0]]["prestige"]):
         mu = _mean(vals)
-        se = _sem(vals)
-        ci = f"[{mu - 1.96*se:+.3f}, {mu + 1.96*se:+.3f}]" if se else "n/a"
-        print(f"  {MODEL_BY_ID[judge]['display_name']:15s}  mean={mu:+.3f}  95% CI {ci}  n={len(vals)}")
+        lo, hi = _bootstrap_ci(vals)
+        ci = f"[{lo:+.3f}, {hi:+.3f}]" if lo is not None else "n/a"
+        print(f"  {MODEL_BY_ID[judge]['display_name']:15s}  mean={mu:+.3f}  95% bootstrap CI {ci}  n={len(vals)}")
 
-    if HAS_SCIPY and len(judge_groups) >= 2:
+    if len(judge_groups) >= 2:
         try:
             h, p_kw = kruskal(*judge_groups.values())
             print(f"  Kruskal-Wallis H={h:.3f}, p={p_kw:.4f}")
