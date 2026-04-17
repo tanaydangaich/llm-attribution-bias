@@ -15,6 +15,12 @@ import os
 import re
 from pathlib import Path
 
+try:
+    from scipy.stats import wilcoxon, mannwhitneyu, kruskal
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
 import openai
 
 # ── Minimal test config ───────────────────────────────────────────────────────
@@ -215,6 +221,16 @@ async def _judge_one(clients, semaphore, r, judge, cond, dry_run):
 
 # ── Phase 3: quick summary ────────────────────────────────────────────────────
 
+def _mean(vals): return sum(vals) / len(vals) if vals else None
+def _sem(vals):
+    import math
+    n = len(vals)
+    if n < 2: return None
+    mu = _mean(vals)
+    var = sum((x - mu) ** 2 for x in vals) / (n - 1)
+    return math.sqrt(var / n)
+
+
 def summarize(judgments):
     from collections import defaultdict
 
@@ -223,7 +239,13 @@ def summarize(judgments):
         if j["condition"] == "blind":
             blind_scores[(j["response_model"], j["judge_model"], j["prompt_id"], j["rep"])] = j["score"]
 
+    # deltas[condition] = list of deltas
+    # deltas_by_task[condition][task_type] = list of deltas
+    # deltas_by_judge[condition][judge_model] = list of deltas
     deltas = defaultdict(list)
+    deltas_by_task = defaultdict(lambda: defaultdict(list))
+    deltas_by_judge = defaultdict(lambda: defaultdict(list))
+
     for j in judgments:
         if j["condition"] == "blind" or j["score"] is None:
             continue
@@ -231,20 +253,131 @@ def summarize(judgments):
         blind = blind_scores.get(key)
         if blind is None:
             continue
-        deltas[j["condition"]].append(j["score"] - blind)
+        d = j["score"] - blind
+        deltas[j["condition"]].append(d)
+        deltas_by_task[j["condition"]][j["task_type"]].append(d)
+        deltas_by_judge[j["condition"]][j["judge_model"]].append(d)
 
-    print("\n" + "="*50)
-    print("QUICK RESULTS")
-    print("="*50)
+    print("\n" + "="*60)
+    print("RESULTS")
+    print("="*60)
+
+    # ── Mean deltas + CIs ──────────────────────────────────────────
+    print("\nMean attribution delta (vs blind):")
     for cond in ["true", "upward", "downward"]:
         vals = deltas[cond]
-        if vals:
-            mean = sum(vals) / len(vals)
-            print(f"  {cond:10s}  mean delta = {mean:+.2f}  (n={len(vals)})")
-        else:
+        if not vals:
             print(f"  {cond:10s}  no data")
+            continue
+        mu = _mean(vals)
+        se = _sem(vals)
+        n = len(vals)
+        ci = f"[{mu - 1.96*se:+.3f}, {mu + 1.96*se:+.3f}]" if se else "n/a"
+        print(f"  {cond:10s}  mean={mu:+.3f}  95% CI {ci}  n={n}")
 
-    # ranking inversions
+    # ── Asymmetry test ─────────────────────────────────────────────
+    print("\nAsymmetry test (|downward delta| > |upward delta|):")
+    if HAS_SCIPY:
+        # Build matched pairs on (response_model, judge_model, prompt_id, rep)
+        up_map, down_map = {}, {}
+        for j in judgments:
+            if j["score"] is None: continue
+            key = (j["response_model"], j["judge_model"], j["prompt_id"], j["rep"])
+            blind = blind_scores.get(key)
+            if blind is None: continue
+            if j["condition"] == "upward":   up_map[key]   = j["score"] - blind
+            if j["condition"] == "downward": down_map[key] = j["score"] - blind
+
+        paired_keys = set(up_map) & set(down_map)
+        up_vals   = [abs(up_map[k])   for k in paired_keys]
+        down_vals = [abs(down_map[k]) for k in paired_keys]
+        n_pairs = len(paired_keys)
+
+        if n_pairs >= 10:
+            try:
+                stat, p = wilcoxon(down_vals, up_vals, alternative="greater")
+                r_rb = (4 * stat) / (n_pairs * (n_pairs + 1)) - 1
+                sig = "* significant" if p < 0.05 else "not significant"
+                print(f"  Wilcoxon signed-rank: stat={stat:.1f}, p={p:.4f}, r={r_rb:.3f}  ({sig})")
+                print(f"  n={n_pairs} matched pairs")
+                if p >= 0.05:
+                    print(f"  NOTE: may be underpowered at n={n_pairs}")
+            except Exception as e:
+                print(f"  error: {e}")
+        else:
+            print(f"  only {n_pairs} matched pairs — insufficient for test (need ≥10)")
+    else:
+        print("  scipy not installed — run: pip install scipy")
+
+    # ── One-sample Wilcoxon: is each delta significantly ≠ 0? ─────
+    print("\nOne-sample test (delta significantly ≠ 0):")
+    if HAS_SCIPY:
+        for cond in ["true", "upward", "downward"]:
+            vals = deltas[cond]
+            if len(vals) < 10:
+                print(f"  {cond:10s}  n={len(vals)} — too small")
+                continue
+            try:
+                _, p = wilcoxon(vals, alternative="two-sided")
+                sig = "* significant" if p < 0.05 else "not significant"
+                print(f"  {cond:10s}  p={p:.4f}  ({sig})")
+            except Exception as e:
+                print(f"  {cond:10s}  error: {e}")
+    else:
+        print("  scipy not installed")
+
+    # ── By task type ───────────────────────────────────────────────
+    print("\nDownward delta by task type:")
+    task_groups = deltas_by_task["downward"]
+    for task, vals in sorted(task_groups.items()):
+        mu = _mean(vals)
+        se = _sem(vals)
+        ci = f"[{mu - 1.96*se:+.3f}, {mu + 1.96*se:+.3f}]" if se else "n/a"
+        print(f"  {task:12s}  mean={mu:+.3f}  95% CI {ci}  n={len(vals)}")
+
+    if HAS_SCIPY and len(task_groups) >= 2:
+        try:
+            h, p_kw = kruskal(*task_groups.values())
+            print(f"  Kruskal-Wallis H={h:.3f}, p={p_kw:.4f}")
+            groups = sorted(task_groups.keys())
+            pairs = [(a, b) for i, a in enumerate(groups) for b in groups[i+1:]]
+            alpha_corr = 0.05 / len(pairs)
+            for a, b in pairs:
+                u, p_mw = mannwhitneyu(task_groups[a], task_groups[b], alternative="two-sided")
+                n1, n2 = len(task_groups[a]), len(task_groups[b])
+                r = 1 - (2 * u) / (n1 * n2)
+                sig = "*" if p_mw < alpha_corr else ""
+                print(f"  {a} vs {b}: p={p_mw:.4f}, r={r:.3f} {sig}  (Bonferroni α={alpha_corr:.3f})")
+        except Exception as e:
+            print(f"  group test error: {e}")
+
+    # ── By judge model ─────────────────────────────────────────────
+    print("\nDownward delta by judge model:")
+    judge_groups = deltas_by_judge["downward"]
+    for judge, vals in sorted(judge_groups.items(), key=lambda x: MODEL_BY_ID[x[0]]["prestige"]):
+        mu = _mean(vals)
+        se = _sem(vals)
+        ci = f"[{mu - 1.96*se:+.3f}, {mu + 1.96*se:+.3f}]" if se else "n/a"
+        print(f"  {MODEL_BY_ID[judge]['display_name']:15s}  mean={mu:+.3f}  95% CI {ci}  n={len(vals)}")
+
+    if HAS_SCIPY and len(judge_groups) >= 2:
+        try:
+            h, p_kw = kruskal(*judge_groups.values())
+            print(f"  Kruskal-Wallis H={h:.3f}, p={p_kw:.4f}")
+            groups = sorted(judge_groups.keys())
+            pairs = [(a, b) for i, a in enumerate(groups) for b in groups[i+1:]]
+            alpha_corr = 0.05 / len(pairs)
+            for a, b in pairs:
+                u, p_mw = mannwhitneyu(judge_groups[a], judge_groups[b], alternative="two-sided")
+                n1, n2 = len(judge_groups[a]), len(judge_groups[b])
+                r = 1 - (2 * u) / (n1 * n2)
+                sig = "*" if p_mw < alpha_corr else ""
+                print(f"  {MODEL_BY_ID[a]['display_name']} vs {MODEL_BY_ID[b]['display_name']}: "
+                      f"p={p_mw:.4f}, r={r:.3f} {sig}  (Bonferroni α={alpha_corr:.3f})")
+        except Exception as e:
+            print(f"  group test error: {e}")
+
+    # ── Ranking inversions ─────────────────────────────────────────
     up_scores = {(j["response_model"], j["judge_model"], j["prompt_id"]): j["score"]
                  for j in judgments if j["condition"] == "upward" and j["score"]}
     down_scores = {(j["response_model"], j["judge_model"], j["prompt_id"]): j["score"]
@@ -262,8 +395,8 @@ def summarize(judgments):
                 if s_up > s_down:
                     inversions += 1
     pct = inversions / total * 100 if total else 0
-    print(f"\n  Ranking inversions: {inversions}/{total} ({pct:.1f}%)")
-    print("="*50)
+    print(f"\nRanking inversions: {inversions}/{total} ({pct:.1f}%)")
+    print("="*60)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
