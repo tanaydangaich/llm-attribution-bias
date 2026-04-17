@@ -793,6 +793,62 @@
     </div>
   </div>
 
+  <!-- Statistical Tests -->
+  <div class="section">
+    <div class="section-label">Statistical Tests</div>
+    <div class="outputs-grid">
+
+      <div class="output-card">
+        <div class="output-icon">①</div>
+        <div>
+          <div class="output-title">Wilcoxon Signed-Rank — Asymmetry</div>
+          <div class="output-desc">
+            Tests whether |downward delta| > |upward delta| on matched pairs.<br><br>
+            <strong style="color:var(--text)">Why:</strong> Scores are integers on a 1–10 scale — not normally distributed, with many ties. Wilcoxon makes no normality assumption and handles ties correctly. Pairs are matched on (response_model, judge_model, prompt_id, rep) so each comparison controls for response quality. Reports p-value and rank-biserial r as effect size.
+          </div>
+        </div>
+      </div>
+
+      <div class="output-card">
+        <div class="output-icon">②</div>
+        <div>
+          <div class="output-title">One-Sample Wilcoxon — Delta ≠ 0</div>
+          <div class="output-desc">
+            Tests whether the mean attribution delta is significantly different from zero for each condition (true, upward, downward).<br><br>
+            <strong style="color:var(--text)">Why:</strong> Blind is the within-subjects baseline. A delta of zero means the attribution label had no effect. This test asks: is the observed shift real, or within noise? Non-parametric for the same reason as above.
+          </div>
+        </div>
+      </div>
+
+      <div class="output-card">
+        <div class="output-icon">③</div>
+        <div>
+          <div class="output-title">Kruskal-Wallis — Group Differences</div>
+          <div class="output-desc">
+            Tests whether the downward delta distribution differs across task types (analytical, creative, factual) and across judge models.<br><br>
+            <strong style="color:var(--text)">Why:</strong> Non-parametric alternative to one-way ANOVA. Used as an omnibus test before running pairwise comparisons — avoids inflating false positives by only running pairwise tests when the overall group difference is significant.
+          </div>
+        </div>
+      </div>
+
+      <div class="output-card">
+        <div class="output-icon">④</div>
+        <div>
+          <div class="output-title">Mann-Whitney U — Pairwise + Bonferroni</div>
+          <div class="output-desc">
+            Pairwise comparisons between task types and between judge models on downward delta. Bonferroni correction applied: α divided by number of pairs.<br><br>
+            <strong style="color:var(--text)">Why:</strong> With 3 task types there are 3 pairs; with 4 judges there are 6 pairs. Running multiple tests at α=0.05 inflates false positive rate. Bonferroni is conservative but appropriate at this sample size. Reports rank-biserial r alongside p-value.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="margin-top:16px; padding:14px 18px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12px; color:var(--muted); line-height:1.7;">
+      <strong style="color:var(--text)">Power caveat:</strong> At ~480 total judgments split across 4 conditions × 3 task types × 3 judges, per-cell n is approximately 20–40. The experiment is likely underpowered for detecting small effects. Results should be interpreted as preliminary signal, not confirmatory evidence. A full run with more models and prompts is required for significance claims.
+    </div>
+  </div>
+
 </div>
 </body>
 </html>
