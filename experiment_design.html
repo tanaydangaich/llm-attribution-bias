@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Attribution Bias — Experiment Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222536;
+    --border: #2e3347;
+    --text: #e8eaf0;
+    --muted: #7b8099;
+    --blind: #6b7280;
+    --true: #3b82f6;
+    --upward: #10b981;
+    --downward: #f43f5e;
+    --analytical: #8b5cf6;
+    --creative: #f59e0b;
+    --factual: #06b6d4;
+    --prestige1: #94a3b8;
+    --prestige2: #60a5fa;
+    --prestige3: #a78bfa;
+    --prestige4: #34d399;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(59,130,246,0.07) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 90% 80%, rgba(139,92,246,0.05) 0%, transparent 50%);
+    color: var(--text);
+    font-family: "DM Sans", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 64px 24px;
+  }
+
+  .page { max-width: 1100px; margin: 0 auto; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .section {
+    animation: fadeUp 0.5s ease both;
+  }
+  .section:nth-child(1) { animation-delay: 0.05s; }
+  .section:nth-child(2) { animation-delay: 0.10s; }
+  .section:nth-child(3) { animation-delay: 0.15s; }
+  .section:nth-child(4) { animation-delay: 0.20s; }
+  .section:nth-child(5) { animation-delay: 0.25s; }
+  .section:nth-child(6) { animation-delay: 0.30s; }
+  .header { animation: fadeUp 0.5s ease both; animation-delay: 0s; }
+
+  /* ── Header ── */
+  .header { text-align: center; margin-bottom: 72px; }
+  .header h1 {
+    font-family: "Syne", sans-serif;
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #e8eaf0 30%, #7b8099);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header p { color: var(--muted); font-size: 15px; max-width: 520px; margin: 0 auto; font-weight: 300; }
+  .tag {
+    display: inline-block;
+    background: rgba(59,130,246,0.1);
+    border: 1px solid rgba(59,130,246,0.25);
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-family: "DM Mono", monospace;
+    font-size: 11px;
+    color: var(--true);
+    margin-bottom: 20px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }
+
+  /* ── Section labels ── */
+  .section { margin-bottom: 64px; }
+  .section-label {
+    font-family: "DM Mono", monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, var(--border), transparent);
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .card-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .card-sub { color: var(--muted); font-size: 12px; }
+
+  /* ── Prestige bar ── */
+  .prestige-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .model-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s, border-color 0.15s;
+  }
+  .model-card:hover { transform: translateY(-2px); }
+  .model-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 12px 12px 0 0;
+  }
+  .model-card.p1::before { background: var(--prestige1); }
+  .model-card.p2::before { background: var(--prestige2); }
+  .model-card.p3::before { background: var(--prestige3); }
+  .model-card.p4::before { background: var(--prestige4); }
+  .model-card:hover.p1 { border-color: var(--prestige1); }
+  .model-card:hover.p2 { border-color: var(--prestige2); }
+  .model-card:hover.p3 { border-color: var(--prestige3); }
+  .model-card:hover.p4 { border-color: var(--prestige4); }
+
+  .prestige-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .model-name { font-family: "Syne", sans-serif; font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .model-id { font-size: 11px; color: var(--muted); font-family: "DM Mono", monospace; }
+  .prestige-dots {
+    display: flex;
+    gap: 4px;
+    margin-top: 14px;
+  }
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+  }
+  .dot.filled.p1 { background: var(--prestige1); }
+  .dot.filled.p2 { background: var(--prestige2); }
+  .dot.filled.p3 { background: var(--prestige3); }
+  .dot.filled.p4 { background: var(--prestige4); }
+
+  /* ── Pipeline ── */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .phase {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    transition: border-color 0.15s;
+  }
+  .phase:hover { border-color: #4a5280; }
+  .phase-num {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .phase-title { font-family: "Syne", sans-serif; font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+  .phase-detail {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+  .phase-detail span { color: var(--text); font-weight: 500; }
+  .phase-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    color: var(--muted);
+    font-size: 16px;
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+
+  .phase-stat {
+    display: inline-block;
+    margin-top: 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-family: "DM Mono", monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  /* ── Conditions ── */
+  .conditions {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .condition-card {
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid transparent;
+    transition: transform 0.15s;
+  }
+  .condition-card:hover { transform: translateY(-2px); }
+  .condition-card.blind  { background: rgba(107,114,128,0.1); border-color: rgba(107,114,128,0.3); }
+  .condition-card.true   { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); }
+  .condition-card.upward { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3); }
+  .condition-card.down   { background: rgba(244,63,94,0.1);  border-color: rgba(244,63,94,0.3); }
+
+  .cond-icon { font-size: 22px; margin-bottom: 10px; }
+  .cond-name { font-family: "Syne", sans-serif; font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .cond-name.blind  { color: var(--blind); }
+  .cond-name.true   { color: var(--true); }
+  .cond-name.upward { color: var(--upward); }
+  .cond-name.down   { color: var(--downward); }
+  .cond-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .cond-example {
+    margin-top: 12px;
+    font-family: "DM Mono", monospace;
+    font-size: 10.5px;
+    font-style: normal;
+    color: var(--muted);
+    padding: 8px 10px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+    border-left: 2px solid var(--border);
+    line-height: 1.5;
+  }
+  .condition-card.blind  .cond-example { border-left-color: var(--blind); }
+  .condition-card.true   .cond-example { border-left-color: var(--true); }
+  .condition-card.upward .cond-example { border-left-color: var(--upward); }
+  .condition-card.down   .cond-example { border-left-color: var(--downward); }
+
+  /* ── Design matrix ── */
+  .matrix-wrap { overflow-x: auto; }
+  .matrix {
+    border-collapse: separate;
+    border-spacing: 4px;
+    width: 100%;
+    table-layout: fixed;
+  }
+  .matrix th {
+    font-family: "DM Sans", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    padding: 10px 12px;
+    text-align: center;
+  }
+  .matrix th.row-header { text-align: right; }
+  .matrix td {
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+    font-size: 11px;
+    vertical-align: middle;
+  }
+  .cell-self {
+    background: rgba(255,255,255,0.02);
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    font-style: italic;
+  }
+  .cell-active {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: transform 0.12s, border-color 0.12s;
+    cursor: default;
+  }
+  .cell-active:hover {
+    transform: scale(1.03);
+    border-color: #4a5280;
+  }
+  .cell-conditions {
+    display: flex;
+    gap: 3px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .cond-pill {
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .cond-pill.blind  { background: rgba(107,114,128,0.2); color: var(--blind); }
+  .cond-pill.true   { background: rgba(59,130,246,0.2);  color: var(--true); }
+  .cond-pill.upward { background: rgba(16,185,129,0.2);  color: var(--upward); }
+  .cond-pill.down   { background: rgba(244,63,94,0.2);   color: var(--downward); }
+  .cond-pill.na     { background: rgba(255,255,255,0.04); color: var(--muted); text-decoration: line-through; }
+
+  .row-label {
+    text-align: right;
+    padding-right: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    width: 130px;
+  }
+  .matrix-note {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    gap: 20px;
+  }
+  .matrix-note span { display: flex; align-items: center; gap: 6px; }
+
+  /* ── Prompts ── */
+  .prompts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .prompt-group { display: flex; flex-direction: column; gap: 8px; }
+  .prompt-group-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    border-radius: 6px;
+    text-align: center;
+  }
+  .prompt-group-label.analytical { background: rgba(139,92,246,0.15); color: var(--analytical); }
+  .prompt-group-label.creative   { background: rgba(245,158,11,0.15);  color: var(--creative); }
+  .prompt-group-label.factual    { background: rgba(6,182,212,0.15);   color: var(--factual); }
+
+  .prompt-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+    flex: 1;
+    transition: border-color 0.15s;
+  }
+  .prompt-card:hover { border-color: #4a5280; color: var(--text); }
+  .prompt-id {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .prompt-id.analytical { color: var(--analytical); }
+  .prompt-id.creative   { color: var(--creative); }
+  .prompt-id.factual    { color: var(--factual); }
+
+  /* ── Analysis outputs ── */
+  .outputs-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .output-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    transition: transform 0.15s, border-color 0.15s;
+  }
+  .output-card:hover { transform: translateY(-2px); border-color: #4a5280; }
+  .output-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .output-title { font-family: "Syne", sans-serif; font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .output-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+  /* ── Delta formula ── */
+  .formula-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 24px;
+    font-family: "DM Mono", monospace;
+    font-size: 13px;
+    text-align: center;
+    color: var(--text);
+    margin-bottom: 20px;
+    letter-spacing: 0.3px;
+  }
+  .formula-box .delta { color: var(--upward); font-weight: 500; }
+  .formula-box .op { color: var(--muted); }
+
+  /* ── Axis labels ── */
+  .axis-label {
+    font-family: "DM Mono", monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="tag">Quick Test · OpenAI Only</div>
+    <h1>LLM Attribution Bias — Experiment Design</h1>
+    <p>Does telling a judge model <em>who wrote</em> a response change how it scores that response, independent of actual quality?</p>
+  </div>
+
+  <!-- Models -->
+  <div class="section">
+    <div class="section-label">Models — Prestige Gradient</div>
+    <div class="prestige-bar">
+      <div class="model-card p1">
+        <div class="prestige-label">Prestige 1</div>
+        <div class="model-name">GPT-3.5 Turbo</div>
+        <div class="model-id">gpt-3.5-turbo</div>
+        <div class="prestige-dots">
+          <div class="dot filled p1"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+      <div class="model-card p2">
+        <div class="prestige-label">Prestige 2</div>
+        <div class="model-name">GPT-4o-mini</div>
+        <div class="model-id">gpt-4o-mini</div>
+        <div class="prestige-dots">
+          <div class="dot filled p2"></div>
+          <div class="dot filled p2"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+      <div class="model-card p3">
+        <div class="prestige-label">Prestige 3</div>
+        <div class="model-name">GPT-4 Turbo</div>
+        <div class="model-id">gpt-4-turbo</div>
+        <div class="prestige-dots">
+          <div class="dot filled p3"></div>
+          <div class="dot filled p3"></div>
+          <div class="dot filled p3"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+      <div class="model-card p4">
+        <div class="prestige-label">Prestige 4</div>
+        <div class="model-name">GPT-4o</div>
+        <div class="model-id">gpt-4o</div>
+        <div class="prestige-dots">
+          <div class="dot filled p4"></div>
+          <div class="dot filled p4"></div>
+          <div class="dot filled p4"></div>
+          <div class="dot filled p4"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pipeline -->
+  <div class="section">
+    <div class="section-label">Pipeline</div>
+    <div class="pipeline">
+      <div class="phase">
+        <div class="phase-num">Phase 01</div>
+        <div class="phase-title">Generate Responses</div>
+        <div class="phase-detail">
+          Each model answers each prompt <span>twice</span> (2 independent reps).<br>
+          Temperature: <span>0.7</span> · Max tokens: <span>1024</span>
+        </div>
+        <div class="phase-stat">48 responses</div>
+      </div>
+      <div class="phase-arrow">→</div>
+      <div class="phase">
+        <div class="phase-num">Phase 02</div>
+        <div class="phase-title">Judge Responses</div>
+        <div class="phase-detail">
+          Every model judges every <span>other</span> model's responses.<br>
+          Self-judging excluded. <span>4 conditions</span> per pair.<br>
+          Temperature: <span>0.0</span> · Max tokens: <span>256</span>
+        </div>
+        <div class="phase-stat">~480–520 judgments</div>
+      </div>
+      <div class="phase-arrow">→</div>
+      <div class="phase">
+        <div class="phase-num">Phase 03</div>
+        <div class="phase-title">Analyze Deltas</div>
+        <div class="phase-detail">
+          Compute <span>attribution delta</span> per judgment.<br>
+          Matched on model · prompt · rep · judge.<br>
+          Blind condition used as within-subjects baseline.
+        </div>
+        <div class="phase-stat">4 analysis outputs</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Conditions -->
+  <div class="section">
+    <div class="section-label">Attribution Conditions</div>
+    <div class="conditions">
+      <div class="condition-card blind">
+        <div class="cond-icon">◻️</div>
+        <div class="cond-name blind">Blind</div>
+        <div class="cond-desc">No attribution shown. Judge sees only the prompt and response.</div>
+        <div class="cond-example">Used as quality baseline. All deltas computed relative to this score.</div>
+      </div>
+      <div class="condition-card true">
+        <div class="cond-icon">✓</div>
+        <div class="cond-name true">True</div>
+        <div class="cond-desc">Judge is told the actual model that generated the response.</div>
+        <div class="cond-example">"This response was generated by GPT-4o-mini."</div>
+      </div>
+      <div class="condition-card upward">
+        <div class="cond-icon">↑</div>
+        <div class="cond-name upward">Upward Mis-attribution</div>
+        <div class="cond-desc">Response credited to the highest-prestige model above the true author.</div>
+        <div class="cond-example">GPT-4o-mini response → "Generated by GPT-4o" (jump +2)</div>
+      </div>
+      <div class="condition-card down">
+        <div class="cond-icon">↓</div>
+        <div class="cond-name down">Downward Mis-attribution</div>
+        <div class="cond-desc">Response credited to the lowest-prestige model below the true author.</div>
+        <div class="cond-example">GPT-4 Turbo response → "Generated by GPT-3.5 Turbo" (jump −2)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Design Matrix -->
+  <div class="section">
+    <div class="section-label">Design Matrix — Response Model × Judge Model</div>
+    <div class="axis-label">JUDGE MODEL →</div>
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th class="row-header">Response model ↓</th>
+            <th>GPT-3.5 Turbo<br><span style="color:#94a3b8;font-weight:400">prestige 1</span></th>
+            <th>GPT-4o-mini<br><span style="color:#60a5fa;font-weight:400">prestige 2</span></th>
+            <th>GPT-4 Turbo<br><span style="color:#a78bfa;font-weight:400">prestige 3</span></th>
+            <th>GPT-4o<br><span style="color:#34d399;font-weight:400">prestige 4</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="row-label">GPT-3.5 Turbo<br><span style="color:var(--muted);font-size:10px">prestige 1</span></td>
+            <td class="cell-self">self — excluded</td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill na">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill na">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill na">↓ down</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td class="row-label">GPT-4o-mini<br><span style="color:var(--muted);font-size:10px">prestige 2</span></td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-self">self — excluded</td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td class="row-label">GPT-4 Turbo<br><span style="color:var(--muted);font-size:10px">prestige 3</span></td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-self">self — excluded</td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill upward">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td class="row-label">GPT-4o<br><span style="color:var(--muted);font-size:10px">prestige 4</span></td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill na">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill na">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-active">
+              <div class="cell-conditions">
+                <span class="cond-pill blind">blind</span>
+                <span class="cond-pill true">true</span>
+                <span class="cond-pill na">↑ up</span>
+                <span class="cond-pill down">↓ down</span>
+              </div>
+            </td>
+            <td class="cell-self">self — excluded</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="matrix-note">
+      <span><span class="cond-pill na" style="display:inline-block">strikethrough</span> condition impossible for this prestige level</span>
+      <span style="color:var(--muted)">Each active cell × 6 prompts × 2 reps = 12 judgments per condition per cell</span>
+    </div>
+  </div>
+
+  <!-- Prompts -->
+  <div class="section">
+    <div class="section-label">Prompts — 6 Total, Balanced by Task Type</div>
+    <div class="prompts-grid">
+      <div class="prompt-group">
+        <div class="prompt-group-label analytical">Analytical</div>
+        <div class="prompt-card">
+          <div class="prompt-id analytical">A1</div>
+          A snail climbs 3 feet per day and slides back 2 feet per night on a 10-foot wall. How many days to reach the top? Show all steps.
+        </div>
+        <div class="prompt-card">
+          <div class="prompt-id analytical">A2</div>
+          Five rational, self-interested pirates split 100 gold coins via seniority-ordered voting. What does the most senior pirate propose?
+        </div>
+      </div>
+      <div class="prompt-group">
+        <div class="prompt-group-label creative">Creative</div>
+        <div class="prompt-card">
+          <div class="prompt-id creative">C1</div>
+          Write a breakup letter from a programmer to their programming language — include a technical grievance, an emotional metaphor, and an ambiguous ending.
+        </div>
+        <div class="prompt-card">
+          <div class="prompt-id creative">C2</div>
+          Describe the same traffic jam from the perspectives of a physicist, a city planner, and a late parent. Exactly two sentences each.
+        </div>
+      </div>
+      <div class="prompt-group">
+        <div class="prompt-group-label factual">Factual</div>
+        <div class="prompt-card">
+          <div class="prompt-id factual">F1</div>
+          A disease affects 1 in 1000 people; a 99%-accurate test returns positive. What is the actual probability the patient has the disease? Walk through the math.
+        </div>
+        <div class="prompt-card">
+          <div class="prompt-id factual">F2</div>
+          Why are antibiotics ineffective against viral infections, and why is overprescription still a problem despite this?
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Analysis -->
+  <div class="section">
+    <div class="section-label">Analysis Outputs</div>
+    <div class="formula-box">
+      <span class="delta">delta</span>
+      <span class="op"> = </span>
+      score(condition)
+      <span class="op"> − </span>
+      score(blind)
+      <span style="color:var(--muted);font-size:12px;margin-left:16px">matched on (response_model, judge_model, prompt_id, rep)</span>
+    </div>
+    <div class="outputs-grid">
+      <div class="output-card">
+        <div class="output-icon">⇅</div>
+        <div>
+          <div class="output-title">Asymmetry Test</div>
+          <div class="output-desc">Mean delta for upward vs downward conditions. Tests whether the penalty for downward mis-attribution is larger in magnitude than the bonus for upward.</div>
+        </div>
+      </div>
+      <div class="output-card">
+        <div class="output-icon">▦</div>
+        <div>
+          <div class="output-title">Delta by Task Type</div>
+          <div class="output-desc">Attribution delta broken down by analytical, creative, and factual tasks. Tests whether bias is stronger where quality is more objectively judgeable.</div>
+        </div>
+      </div>
+      <div class="output-card">
+        <div class="output-icon">◈</div>
+        <div>
+          <div class="output-title">Delta by Judge Model</div>
+          <div class="output-desc">Attribution delta per judge model. Tests whether weaker judge models are more susceptible to prestige bias than stronger ones.</div>
+        </div>
+      </div>
+      <div class="output-card">
+        <div class="output-icon">⇄</div>
+        <div>
+          <div class="output-title">Ranking Inversions</div>
+          <div class="output-desc">Cases where a lower-prestige response attributed upward outscores a higher-prestige response attributed downward, for the same judge and prompt.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

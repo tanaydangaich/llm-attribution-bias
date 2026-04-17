@@ -1,0 +1,21 @@
+# API keys
+.env
+*.env
+
+# Generated data (re-runnable)
+data/test_responses.json
+data/test_judgments.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
