@@ -29,7 +29,7 @@ Same models act as both response generators and judges. Self-judging excluded.
 
 | ID | Type | Topic |
 |---|---|---|
-| A1 | Analytical | Snail wall climbing problem |
+| A1 | Analytical | Company revenue break-even illusion |
 | A2 | Analytical | Pirate gold coin game theory |
 | C1 | Creative | Programmer breakup letter |
 | C2 | Creative | Traffic jam — three perspectives |
