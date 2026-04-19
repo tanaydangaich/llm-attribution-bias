@@ -20,18 +20,25 @@ CONDITIONS = ["true", "upward", "downward"]
 CONDITION_LABELS = {"true": "True", "upward": "Upward", "downward": "Downward"}
 CONDITION_COLORS = {"true": "#4C72B0", "upward": "#55A868", "downward": "#C44E52"}
 
+_DISPLAY = {
+    "gpt-3.5-turbo": "GPT-3.5 Turbo",
+    "gpt-4o-mini":   "GPT-4o-mini",
+    "gpt-4-turbo":   "GPT-4 Turbo",
+    "gpt-4o":        "GPT-4o",
+}
+
 
 def compute_deltas(judgments):
     blind = {}
     for j in judgments:
         if j["condition"] == "blind" and j["score"] is not None:
-            blind[(j["response_model"], j["judge_model"], j["prompt_id"])] = j["score"]
+            blind[(j["response_model"], j["judge_model"], j["prompt_id"], j["rep"])] = j["score"]
 
     deltas = defaultdict(list)
     for j in judgments:
         if j["condition"] == "blind" or j["score"] is None:
             continue
-        key = (j["response_model"], j["judge_model"], j["prompt_id"])
+        key = (j["response_model"], j["judge_model"], j["prompt_id"], j["rep"])
         b = blind.get(key)
         if b is None:
             continue
@@ -88,8 +95,6 @@ def plot_by_task(deltas, out_path):
         means = []
         sems = []
         for tt in task_types:
-            vals = deltas.get((cond, tt, None))
-            # aggregate across all judge_models
             agg = []
             for (c, t, _), v in deltas.items():
                 if c == cond and t == tt:
@@ -146,7 +151,7 @@ def plot_by_judge(deltas, out_path):
 
     ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
     ax.set_xticks(x + width)
-    ax.set_xticklabels(judge_models, rotation=15, ha="right")
+    ax.set_xticklabels([_DISPLAY.get(jm, jm) for jm in judge_models], rotation=15, ha="right")
     ax.set_ylabel("Mean score delta vs. blind")
     ax.set_title("Attribution bias by judge model")
     ax.legend()

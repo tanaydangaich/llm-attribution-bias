@@ -46,8 +46,8 @@ Each response is judged under 4 attribution conditions:
 |---|---|
 | Blind | Nothing |
 | True | Actual model that wrote the response |
-| Upward | Highest-prestige model above the true author |
-| Downward | Lowest-prestige model below the true author |
+| Upward | Nearest-prestige model above the true author (prestige + 1) |
+| Downward | Nearest-prestige model below the true author (prestige − 1) |
 
 Primary metric: **attribution delta** = `score(condition) − score(blind)`
 
