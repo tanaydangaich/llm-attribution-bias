@@ -1,8 +1,8 @@
-# LLM Attribution Bias — Quick Test
+# LLM Judge Identity Bias — Quick Test
 
 Does telling a judge model *who wrote* a response change how it scores that response, independent of actual quality?
 
-This is a self-contained OpenAI-only experiment testing **attribution bias** in LLM-as-judge evaluation pipelines.
+This is a self-contained OpenAI-only experiment testing **identity bias** in LLM-as-judge evaluation pipelines.
 
 → [Experiment Design](experiment_design.html)
 
@@ -12,7 +12,7 @@ This is a self-contained OpenAI-only experiment testing **attribution bias** in 
 
 Four OpenAI models with a defined prestige gradient:
 
-| Model | Prestige |
+| Model | Tier |
 |---|---|
 | GPT-4o Mini | 1 |
 | GPT-4.1 Mini | 2 |

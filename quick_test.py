@@ -1,5 +1,6 @@
 """
-Quick smoke-test: 4 models × 6 prompts × 4 conditions.
+LLM Judge Identity Bias — Quick Test
+4 models × 6 prompts × 4 conditions.
 Writes to data/test_responses.json and data/test_judgments.json.
 Only needs OPENAI_API_KEY.
 
@@ -115,6 +116,13 @@ def build_attribution(condition: str, response_model_id: str):
     raise ValueError(condition)
 
 
+def _model_kwargs(model_id: str, temperature: float, max_tokens: int) -> dict:
+    # gpt-5-mini only supports default temperature (1) and max_completion_tokens
+    if model_id.startswith("gpt-5"):
+        return {"max_completion_tokens": max_tokens}
+    return {"temperature": temperature, "max_tokens": max_tokens}
+
+
 async def call(clients: dict, model_id: str, prompt: str, temperature: float, max_tokens: int) -> str:
     max_retries = 5
     for attempt in range(max_retries):
@@ -122,8 +130,7 @@ async def call(clients: dict, model_id: str, prompt: str, temperature: float, ma
             resp = await clients["openai"].chat.completions.create(
                 model=model_id,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=max_tokens,
+                **_model_kwargs(model_id, temperature, max_tokens),
             )
             return resp.choices[0].message.content.strip()
         except openai.RateLimitError:
@@ -142,7 +149,7 @@ async def call(clients: dict, model_id: str, prompt: str, temperature: float, ma
 
 # ── Phase 1: generate responses ───────────────────────────────────────────────
 
-N_REPS = 2
+N_REPS = 5
 
 async def generate_all(clients, semaphore, existing_keys):
     tasks = []
