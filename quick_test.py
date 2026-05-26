@@ -22,10 +22,10 @@ import openai
 # ── Minimal test config ───────────────────────────────────────────────────────
 
 MODELS = [
-    {"id": "gpt-3.5-turbo", "provider": "openai", "prestige": 1, "display_name": "GPT-3.5 Turbo"},
-    {"id": "gpt-4o-mini",   "provider": "openai", "prestige": 2, "display_name": "GPT-4o-mini"},
-    {"id": "gpt-4-turbo",   "provider": "openai", "prestige": 3, "display_name": "GPT-4 Turbo"},
-    {"id": "gpt-4o",        "provider": "openai", "prestige": 4, "display_name": "GPT-4o"},
+    {"id": "gpt-4o-mini",   "provider": "openai", "prestige": 1, "display_name": "GPT-4o Mini"},
+    {"id": "gpt-4.1-mini",  "provider": "openai", "prestige": 2, "display_name": "GPT-4.1 Mini"},
+    {"id": "gpt-4.1",       "provider": "openai", "prestige": 3, "display_name": "GPT-4.1"},
+    {"id": "gpt-5-mini",    "provider": "openai", "prestige": 4, "display_name": "GPT-5 Mini"},
 ]
 MODEL_BY_ID = {m["id"]: m for m in MODELS}
 CONDITIONS = ["blind", "true", "upward", "downward"]
@@ -389,7 +389,11 @@ def summarize(judgments):
         except Exception as e:
             print(f"  group test error: {e}")
 
-    # ── Ranking inversions ─────────────────────────────────────────
+    # ── Attribution-induced ranking inversions ─────────────────────
+    # For pairs (rm_up, rm_down) where rm_up has lower prestige than rm_down,
+    # only count pairs where the blind condition already favored rm_down (≥ rm_up).
+    # An inversion = attribution flipped a ranking that blind scoring established.
+    # This controls for actual quality differences between response models.
     up_scores = {(j["response_model"], j["judge_model"], j["prompt_id"], j["rep"]): j["score"]
                  for j in judgments if j["condition"] == "upward" and j["score"]}
     down_scores = {(j["response_model"], j["judge_model"], j["prompt_id"], j["rep"]): j["score"]
@@ -402,16 +406,37 @@ def summarize(judgments):
                 continue
             p_up = MODEL_BY_ID[rm_up]["prestige"]
             p_down = MODEL_BY_ID[rm_down]["prestige"]
-            if p_up < p_down:
+            if p_up >= p_down:
+                continue
+            blind_up = blind_scores.get((rm_up, jm, pid, rep))
+            blind_down = blind_scores.get((rm_down, jm, pid, rep))
+            if blind_up is None or blind_down is None:
+                continue
+            if blind_down >= blind_up:
                 total += 1
                 if s_up > s_down:
                     inversions += 1
     pct = inversions / total * 100 if total else 0
-    print(f"\nRanking inversions: {inversions}/{total} ({pct:.1f}%)")
+    print(f"\nAttribution-induced ranking inversions: {inversions}/{total} ({pct:.1f}%)")
+    print("  (pairs where blind favoured higher-prestige model; attribution flipped it)")
     print("="*60)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
+async def preflight_check(client):
+    print("\n[0/3] Checking model availability...")
+    resp = await client.models.list()
+    available = {m.id for m in resp.data}
+    ok = True
+    for m in MODELS:
+        status = "OK" if m["id"] in available else "NOT FOUND"
+        print(f"  {m['id']:20s}  {status}")
+        if status == "NOT FOUND":
+            ok = False
+    if not ok:
+        raise SystemExit("One or more models unavailable. Update MODELS list before running.")
+
 
 async def main(dry_run: bool):
     clients = {
@@ -420,6 +445,8 @@ async def main(dry_run: bool):
     sem_gen = asyncio.Semaphore(3)
     sem_judge = asyncio.Semaphore(8)
     (_DIR / "data").mkdir(exist_ok=True)
+
+    await preflight_check(clients["openai"])
 
     # Load existing
     def load(path):

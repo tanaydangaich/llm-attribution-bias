@@ -14,10 +14,10 @@ Four OpenAI models with a defined prestige gradient:
 
 | Model | Prestige |
 |---|---|
-| GPT-3.5 Turbo | 1 |
-| GPT-4o-mini | 2 |
-| GPT-4 Turbo | 3 |
-| GPT-4o | 4 |
+| GPT-4o Mini | 1 |
+| GPT-4.1 Mini | 2 |
+| GPT-4.1 | 3 |
+| GPT-5 Mini | 4 |
 
 Same models act as both response generators and judges. Self-judging excluded.
 
