@@ -1,6 +1,6 @@
 """
 Generate plots from test_judgments.json.
-Writes plots/deltas.png, plots/by_task.png, plots/by_judge.png.
+Writes plots/deltas.png, plots/by_task.png, plots/by_judge.png, plots/inversions.png.
 
 Usage:
     python plot.py
@@ -123,6 +123,118 @@ def plot_by_task(deltas, out_path):
     print(f"  saved {out_path}")
 
 
+def compute_inversions(judgments):
+    """
+    For each (judge, prompt, rep), compare all pairs of response models.
+    Inversion = blind ranking flipped under attributed condition.
+    Returns dict: {(condition, task_type): (inversions, total)}
+    """
+    blind = {}
+    task_for = {}
+    for j in judgments:
+        key = (j["response_model"], j["judge_model"], j["prompt_id"], j["rep"])
+        if j["condition"] == "blind" and j["score"] is not None:
+            blind[key] = j["score"]
+            task_for[key] = j["task_type"]
+
+    cond_scores = defaultdict(dict)
+    for j in judgments:
+        if j["condition"] == "blind" or j["score"] is None:
+            continue
+        key = (j["response_model"], j["judge_model"], j["prompt_id"], j["rep"])
+        cond_scores[j["condition"]][key] = j["score"]
+
+    results = defaultdict(lambda: [0, 0])  # (cond, task_type) -> [inv, total]
+
+    for cond, scores in cond_scores.items():
+        seen = set()
+        for (rm1, jm, pid, rep), s1_cond in scores.items():
+            k1 = (rm1, jm, pid, rep)
+            b1 = blind.get(k1)
+            if b1 is None:
+                continue
+            for (rm2, jm2, pid2, rep2), s2_cond in scores.items():
+                if jm2 != jm or pid2 != pid or rep2 != rep or rm2 == rm1:
+                    continue
+                pair = tuple(sorted([rm1, rm2]))
+                pair_key = (cond, pair, jm, pid, rep)
+                if pair_key in seen:
+                    continue
+                seen.add(pair_key)
+                k2 = (rm2, jm, pid, rep)
+                b2 = blind.get(k2)
+                if b2 is None or b1 == b2:
+                    continue
+                tt = task_for.get(k1, "unknown")
+                results[(cond, tt)][1] += 1
+                blind_order = b1 > b2
+                cond_order = s1_cond > s2_cond
+                if blind_order != cond_order:
+                    results[(cond, tt)][0] += 1
+
+    return results
+
+
+def plot_inversions(judgments, out_path):
+    inv_data = compute_inversions(judgments)
+    task_types = sorted({tt for (_, tt) in inv_data})
+    width = 0.25
+    x = np.arange(len(task_types))
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+    # Left: inversion rate by condition (aggregated across task types)
+    ax = axes[0]
+    overall = {}
+    for cond in CONDITIONS:
+        inv, tot = 0, 0
+        for tt in task_types:
+            d = inv_data.get((cond, tt), [0, 0])
+            inv += d[0]; tot += d[1]
+        overall[cond] = inv / tot * 100 if tot else 0
+
+    bars = ax.bar(
+        np.arange(len(CONDITIONS)),
+        [overall[c] for c in CONDITIONS],
+        color=[CONDITION_COLORS[c] for c in CONDITIONS],
+        width=0.5,
+    )
+    for bar, cond in zip(bars, CONDITIONS):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.5,
+            f"{overall[cond]:.1f}%",
+            ha="center", va="bottom", fontsize=9,
+        )
+    ax.set_xticks(np.arange(len(CONDITIONS)))
+    ax.set_xticklabels([CONDITION_LABELS[c] for c in CONDITIONS])
+    ax.set_ylabel("Ranking inversion rate (%)")
+    ax.set_title("Inversion rate by condition")
+    ax.set_ylim(0, max(overall.values()) * 1.25 + 5)
+
+    # Right: inversion rate by condition × task type
+    ax = axes[1]
+    for i, cond in enumerate(CONDITIONS):
+        rates = []
+        for tt in task_types:
+            d = inv_data.get((cond, tt), [0, 0])
+            rates.append(d[0] / d[1] * 100 if d[1] else 0)
+        ax.bar(x + i * width, rates, width=width,
+               label=CONDITION_LABELS[cond], color=CONDITION_COLORS[cond])
+
+    ax.set_xticks(x + width)
+    ax.set_xticklabels([tt.capitalize() for tt in task_types])
+    ax.set_ylabel("Ranking inversion rate (%)")
+    ax.set_title("Inversion rate by condition × task type")
+    ax.legend()
+
+    fig.suptitle("Attribution-induced ranking inversions", fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"  saved {out_path}")
+
+
 def plot_by_judge(deltas, out_path):
     judge_models = sorted({jm for (_, _, jm) in deltas})
     x = np.arange(len(judge_models))
@@ -169,6 +281,7 @@ def main():
     plot_deltas(deltas, PLOTS_DIR / "deltas.png")
     plot_by_task(deltas, PLOTS_DIR / "by_task.png")
     plot_by_judge(deltas, PLOTS_DIR / "by_judge.png")
+    plot_inversions(judgments, PLOTS_DIR / "inversions.png")
 
 
 if __name__ == "__main__":

@@ -75,4 +75,4 @@ python quick_test.py --dry-run
 |---|---|
 | `data/test_responses.json` | Generated responses |
 | `data/test_judgments.json` | Scores + rationales |
-| `plots/` | Delta charts by condition, task type, judge model |
+| `plots/` | Delta charts by condition, task type, judge model, ranking inversions |
