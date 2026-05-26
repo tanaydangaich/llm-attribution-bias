@@ -1,4 +1,4 @@
-# LLM Judge Identity Bias — Quick Test
+# LLM Judge Identity Bias
 
 Does telling a judge model *who wrote* a response change how it scores that response, independent of actual quality?
 
@@ -10,7 +10,7 @@ This is a self-contained OpenAI-only experiment testing **identity bias** in LLM
 
 ## Models
 
-Four OpenAI models with a defined prestige gradient:
+Four OpenAI models with a defined tier gradient:
 
 | Model | Tier |
 |---|---|
@@ -46,13 +46,13 @@ Each response is judged under 4 attribution conditions:
 |---|---|
 | Blind | Nothing |
 | True | Actual model that wrote the response |
-| Upward | Nearest-prestige model above the true author (prestige + 1) |
-| Downward | Nearest-prestige model below the true author (prestige − 1) |
+| Upward | Nearest-tier model above the true author (tier + 1) |
+| Downward | Nearest-tier model below the true author (tier − 1) |
 
 Primary metric: **attribution delta** = `score(condition) − score(blind)`
 
-- 4 models × 6 prompts × 2 reps = **48 responses**
-- 3 judges per response × 4 conditions = **~480 judgments**
+- 4 models × 6 prompts × 5 reps = **120 responses**
+- 3 judges per response × 4 conditions = **1,260 judgments**
 
 ---
 
