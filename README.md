@@ -59,7 +59,6 @@ Primary metric: **attribution delta** = `score(condition) − score(blind)`
 ## Usage
 
 ```bash
-cd quick_test
 export OPENAI_API_KEY=your_key_here
 python quick_test.py
 

@@ -2,12 +2,12 @@
 
 ```mermaid
 flowchart TD
-    A["<b>4 OpenAI Models</b>\nGPT-3.5 Turbo · GPT-4o-mini · GPT-4 Turbo · GPT-4o\n(prestige 1 → 4)"]
+    A["<b>4 OpenAI Models</b>\nGPT-4o Mini · GPT-4.1 Mini · GPT-4.1 · GPT-5 Mini\n(tier 1 → 4)"]
     B["<b>6 Prompts</b>\n2 Analytical · 2 Creative · 2 Factual"]
 
     A & B --> C
 
-    C["<b>Phase 1: Generate Responses</b>\ntemp=0.7 · max_tokens=1024\n2 reps per (model × prompt)\n→ 48 responses"]
+    C["<b>Phase 1: Generate Responses</b>\ntemp=0.7 · max_tokens=1024\n5 reps per (model × prompt)\n→ 120 responses"]
 
     C --> D["<b>Phase 2: Build Judge Pairs</b>\nAll models judge all others\n(self-judging excluded)\n→ 3 judges per response"]
 
@@ -20,7 +20,7 @@ flowchart TD
 
     E1 & E2 & E3 & E4 --> F
 
-    F["<b>Score (1–10) + Rationale</b>\ntemp=0.0 · max_tokens=256\n→ ~480–520 judgments"]
+    F["<b>Score (1–10) + Rationale</b>\ntemp=0.0 · max_tokens=256\n→ 1,260 judgments"]
 
     F --> G["<b>Phase 3: Compute Attribution Delta</b>\ndelta = score(condition) − score(blind)\nmatched on (response_model, judge_model, prompt_id, rep)"]
 
